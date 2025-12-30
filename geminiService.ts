@@ -1,26 +1,52 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
-export const generateBanner = async (destination: string): Promise<string | null> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+/**
+ * Vite frontend env vars must start with VITE_
+ * Set on Vercel: VITE_GEMINI_API_KEY = <your key>
+ */
+function getAI() {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+
+  // Fail fast so UI won't spin forever
+  if (!apiKey || apiKey.trim().length === 0) {
+    throw new Error(
+      "Missing VITE_GEMINI_API_KEY. Add it in Vercel Environment Variables and redeploy."
+    );
+  }
+
+  return new GoogleGenAI({ apiKey });
+}
+
+function stripBase64Prefix(input: string) {
+  // supports "data:image/jpeg;base64,...." or raw base64
+  return input.includes("base64,") ? input.split("base64,")[1] : input;
+}
+
+export const generateBanner = async (
+  destination: string
+): Promise<string | null> => {
   try {
+    const ai = getAI();
+
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: "gemini-2.5-flash-image",
       contents: {
         parts: [
-          { text: `A beautiful, high-quality wide landscape photograph of ${destination}. Aesthetic travel photography style, sunny day, cinematic lighting, no text, no people. 16:9 aspect ratio.` },
+          {
+            text: `A beautiful, high-quality wide landscape photograph of ${destination}. Aesthetic travel photography style, sunny day, cinematic lighting, no text, no people. 16:9 aspect ratio.`,
+          },
         ],
       },
       config: {
         imageConfig: {
-          aspectRatio: "16:9"
-        }
-      }
+          aspectRatio: "16:9",
+        },
+      },
     });
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+      if ((part as any).inlineData?.data) {
+        return `data:image/png;base64,${(part as any).inlineData.data}`;
       }
     }
     return null;
@@ -31,8 +57,9 @@ export const generateBanner = async (destination: string): Promise<string | null
 };
 
 export const fetchCurrentWeather = async (location: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
+    const ai = getAI();
+
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Get the current weather for ${location}. Return a JSON object with: high (number), low (number), condition (string: e.g. Sunny, Cloudy, Rainy, Snowy), and city (string).`,
@@ -45,12 +72,14 @@ export const fetchCurrentWeather = async (location: string) => {
             high: { type: Type.NUMBER },
             low: { type: Type.NUMBER },
             condition: { type: Type.STRING },
-            city: { type: Type.STRING }
+            city: { type: Type.STRING },
           },
-          required: ["high", "low", "condition", "city"]
-        }
+          required: ["high", "low", "condition", "city"],
+        },
       },
     });
+
+    // response.text should be JSON string
     return JSON.parse(response.text);
   } catch (error) {
     console.error("Weather fetch error:", error);
@@ -58,19 +87,23 @@ export const fetchCurrentWeather = async (location: string) => {
   }
 };
 
-export const editTravelPhoto = async (base64Image: string, prompt: string): Promise<string | null> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const editTravelPhoto = async (
+  base64Image: string,
+  prompt: string
+): Promise<string | null> => {
   try {
-    const base64Data = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
+    const ai = getAI();
+
+    const base64Data = stripBase64Prefix(base64Image);
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: "gemini-2.5-flash-image",
       contents: {
         parts: [
           {
             inlineData: {
               data: base64Data,
-              mimeType: 'image/jpeg',
+              mimeType: "image/jpeg",
             },
           },
           { text: prompt },
@@ -79,8 +112,8 @@ export const editTravelPhoto = async (base64Image: string, prompt: string): Prom
     });
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+      if ((part as any).inlineData?.data) {
+        return `data:image/png;base64,${(part as any).inlineData.data}`;
       }
     }
     return null;
@@ -91,22 +124,23 @@ export const editTravelPhoto = async (base64Image: string, prompt: string): Prom
 };
 
 export const chatWithGemini = async (
-  message: string, 
-  history: any[], 
-  modelName: string = 'gemini-3-flash-preview',
-  imagePart?: { mimeType: string, data: string }
+  message: string,
+  history: any[],
+  modelName: string = "gemini-3-flash-preview",
+  imagePart?: { mimeType: string; data: string }
 ) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
+    const ai = getAI();
+
     const chat = ai.chats.create({
       model: modelName,
-      history: history,
+      history,
       config: {
-        systemInstruction: `You are a helpful travel assistant. 
-          FORMATTING: Use clear Markdown. Use bold for key locations. Use ### for headers. Use bullet points.
-          TONE: Friendly, expert, and encouraging.
-          CAPABILITY: You can see images if the user uploads them. Analyze food, signs, or landmarks in images.`,
-      }
+        systemInstruction: `You are a helpful travel assistant.
+FORMATTING: Use clear Markdown. Use bold for key locations. Use ### for headers. Use bullet points.
+TONE: Friendly, expert, and encouraging.
+CAPABILITY: You can see images if the user uploads them. Analyze food, signs, or landmarks in images.`,
+      },
     });
 
     const parts: any[] = [{ text: message }];
@@ -114,6 +148,7 @@ export const chatWithGemini = async (
       parts.push({ inlineData: imagePart });
     }
 
+    // Keep the same call style you used originally
     const result = await chat.sendMessage({ message: parts as any });
     return result.text;
   } catch (error) {
@@ -122,23 +157,33 @@ export const chatWithGemini = async (
   }
 };
 
-export const translateVision = async (base64Image: string, from: string, to: string): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const translateVision = async (
+  base64Image: string,
+  from: string,
+  to: string
+): Promise<string> => {
   try {
+    const ai = getAI();
+
+    const base64Data = stripBase64Prefix(base64Image);
+
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: "gemini-3-flash-preview",
       contents: {
         parts: [
           {
             inlineData: {
-              data: base64Image,
-              mimeType: 'image/jpeg',
+              data: base64Data,
+              mimeType: "image/jpeg",
             },
           },
-          { text: `You are a travel assistant. Detect all text in this image written in ${from} and translate it to ${to}. Only return the translated text. If there is no text, return "No text detected". Keep it concise.` },
+          {
+            text: `You are a travel assistant. Detect all text in this image written in ${from} and translate it to ${to}. Only return the translated text. If there is no text, return "No text detected". Keep it concise.`,
+          },
         ],
       },
     });
+
     return response.text || "Could not translate.";
   } catch (error) {
     console.error("Translation error:", error);
@@ -146,13 +191,19 @@ export const translateVision = async (base64Image: string, from: string, to: str
   }
 };
 
-export const translateText = async (text: string, from: string, to: string): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const translateText = async (
+  text: string,
+  from: string,
+  to: string
+): Promise<string> => {
   try {
+    const ai = getAI();
+
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: "gemini-3-flash-preview",
       contents: `Translate this text from ${from} to ${to}: "${text}". Only return the translation.`,
     });
+
     return response.text || "Could not translate.";
   } catch (error) {
     console.error("Text translation error:", error);
@@ -160,23 +211,33 @@ export const translateText = async (text: string, from: string, to: string): Pro
   }
 };
 
-export const translateAudio = async (base64Audio: string, from: string, to: string): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const translateAudio = async (
+  base64Audio: string,
+  from: string,
+  to: string
+): Promise<string> => {
   try {
+    const ai = getAI();
+
+    const base64Data = stripBase64Prefix(base64Audio);
+
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+      model: "gemini-2.5-flash-native-audio-preview-09-2025",
       contents: {
         parts: [
           {
             inlineData: {
-              data: base64Audio,
-              mimeType: 'audio/webm',
+              data: base64Data,
+              mimeType: "audio/webm",
             },
           },
-          { text: `Transcribe and translate the speech in this audio from ${from} to ${to}. Only return the final translated text.` },
+          {
+            text: `Transcribe and translate the speech in this audio from ${from} to ${to}. Only return the final translated text.`,
+          },
         ],
       },
     });
+
     return response.text || "Could not understand audio.";
   } catch (error) {
     console.error("Audio translation error:", error);
