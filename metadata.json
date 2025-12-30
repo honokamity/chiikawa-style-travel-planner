@@ -1,0 +1,9 @@
+{
+  "name": "Chiikawa Style Travel Planner",
+  "description": "A minimalist, cute Japan travel planner inspired by Nagano's Chiikawa. Features easy itinerary management, real-time currency conversion, Google Maps integration, and an AI-powered travel photo editor.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
